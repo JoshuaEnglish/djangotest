@@ -1,0 +1,2 @@
+# djangotest
+Troubleshooting Django issues
