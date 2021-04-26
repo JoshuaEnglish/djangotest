@@ -6,6 +6,10 @@ from .models import Role, Person, Team
 class RepInline(admin.TabularInline):
     model = Team.rep.through
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.filter(person__role__name="Sales Rep")
+
 
 class EngInline(admin.TabularInline):
     model = Team.eng.through
