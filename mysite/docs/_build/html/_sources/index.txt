@@ -1,0 +1,25 @@
+.. Django Tests documentation master file, created by
+   sphinx-quickstart on Mon Apr 26 09:11:05 2021.
+   You can adapt this file completely to your liking, but it should at least
+   contain the root `toctree` directive.
+
+Welcome to Django Tests's documentation!
+========================================
+
+While developing my first serious django app, I ran into several problems that
+didn't make sense to me. I've posted several questions on Stack Overflow, but
+did not make actual working examples of my issues, so this is my attempt to
+do a more serious troubleshooting.
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents:
+
+   limit_choices_to
+
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
