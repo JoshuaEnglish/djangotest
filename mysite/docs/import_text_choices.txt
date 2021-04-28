@@ -1,0 +1,81 @@
+Importing Text Choices
+======================
+
+In my full app I managed to use django-import-export to pull in 45-thousand
+records, but one field, which is a text choice, imported with the full value
+instead of the code, so the later filter did not recognize the codes.
+
+After some searching online, I didn't find a decent solution to this problem
+(or, most likely, I don't know how to ask Duck Duck Go the question).
+
+So this app tests importing a field that uses a text choice.
+
+In `models.py`::
+
+    from django.db import models
+    from django.utils.translation import gettext_lazy as _
+
+
+    class Status(models.TextChoices):
+        NEW = "NEW", _("New")
+        CONTINUED = "CNT", _("Continued")
+        REMOVED = "RMV", _("Removed")
+
+
+    class Territory(models.Model):
+        name = models.CharField("Name", max_length=64)
+        status = models.CharField(
+            "Status", max_length=3, choices=Status.choices, default=Status.NEW
+        )
+
+        def __str__(self):
+            return f"{self.name}|{self.status}"
+
+        def __repr__(self):
+            return f"<Territory {self.name}>"
+
+and in `resources.py`::
+
+    from import_export import resources
+
+    from .models import Territory
+
+
+    class TerritoryResource(resources.ModelResource):
+        class Meta:
+            model = Territory
+            skip_unchanged = True
+            fields = ("id", "name", "status")
+
+I wrote a test case to import a dataset and it broke, but not for the reasons 
+I expected. For some reason I had to include a hard-coded id to the import.
+
+From tests.py::
+
+    from django.test import TestCase
+
+    from import_text_choice.models import Territory, Status
+    from import_text_choice.resources import TerritoryResource
+
+    from tablib import Dataset
+
+
+    class ImportTestCase(TestCase):
+        def test_basic_import(self):
+            """importing with the choice's verbose name should encode correctly"""
+            data = ["1", "Joes", "Continued"]
+
+            territories = TerritoryResource()
+            dataset = Dataset(data, headers=["id", "name", "status"])
+            territories.import_data(dataset, dry_run=False)
+            res = Territory.objects.get(name="Joes")
+            self.assertEqual(res.status, Status.CONTINUED)
+
+This doesn't tie the text choices to the database. You can see the issue in
+this commit (TBD).
+
+From `this answer`_ on StackOverflow, the correct solution should be
+to use a Foregn Key.
+
+
+.. _this answer: https://stackoverflow.com/questions/66604764/django-textchoices-and-admin-site-register

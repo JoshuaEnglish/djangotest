@@ -16,6 +16,7 @@ do a more serious troubleshooting.
    :caption: Contents:
 
    limit_choices_to
+   import_text_choices
 
 Indices and tables
 ==================
