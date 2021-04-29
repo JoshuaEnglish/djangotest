@@ -1,0 +1,244 @@
+Migrations with data change
+===========================
+
+In my original application I used a Status code as a model.TextChoice and 
+discovered two problem with it.
+
+1. A CharField with a choices option still allows anything in the field
+2. A CharField with choices doesn't validate against the max_length constraint
+
+Point 2 is probably more to do with the underlying database than django.
+
+The solution was to transform the Status as a TextChoice into a separate
+model, and use a ForeignKey instead. For the traditional no-good-reason, I 
+didn't want to delete the 45K+ lines I had already imported, fix the model, and 
+re-import. So I asked `Reddit`_.
+
+The users there suggested a home-brewed migration,
+which I've never done. Yay for the redditors who have so much faith in me, but
+damn is that a scary thought. So here goes.
+
+I created a new app called ``migration`` and added the model similar to what
+I started with to test the import_text_choices feature that I've abandoned.
+
+``models.py``::
+
+    from django.db import models
+    from django.utils.translation import gettext_lazy as _
+
+    class Status(models.TextChoices):
+        NEW = "NEW", _("New")
+        CONTINUED = "CNT", _("Continued")
+        REMOVED = "RMV", _("Removed")
+
+    class Thing(models.Model):
+        name = models.CharField("Name", max_length=64)
+        status = models.CharField(
+            "Status", max_length=3, choices=Status.choices, default=Status.NEW
+        )
+
+I made the initial migration and ran it, then opened a shell and did a little
+jiggery-pokery::
+
+    >from migration.models import Status, Thing
+    >import string
+    >import random
+    >choices = [b for a,b in Status.choices]
+    >for i in range(100):
+    ...  Thing.objects.create(name=''.join(random.sample(string.ascii_lowercase, 10), status=random.choice(choices))
+
+So that gave me 100 objects to play with.  I edited ``models.py``::
+
+    from django.db import models
+
+    class Status(models.Model):
+        name = models.CharField("Name", max_length=32)
+
+    class Thing(models.Model):
+        name = models.CharField("Name", max_length=64)
+        status = models.ForeignKey(
+            Status, on_delete=models.PROTECT, related_name="things"
+        )
+
+And ran::
+
+    >manage.py makemigrations --name change_status migration
+
+That gave me the following migration::
+
+    from django.db import migrations, models
+    import django.db.models.deletion
+
+
+    class Migration(migrations.Migration):
+
+        dependencies = [
+            ('migration', '0001_initial'),
+        ]
+
+        operations = [
+            migrations.CreateModel(
+                name='Status',
+                fields=[
+                    ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                    ('name', models.CharField(max_length=32, verbose_name='Name')),
+                ],
+            ),
+            migrations.AlterField(
+                model_name='thing',
+                name='status',
+                field=models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='things', to='migration.status'),
+            ),
+        ]
+
+Now the trick was to figure out the safe way to pull this off. I needed to 
+create the instances of the Status modelo
+
+My edited ``migrations\0002_change_status_migration.py``::
+
+    from django.db import migrations, models
+    import django.db.models.deletion
+
+
+    def create_statuses(apps, schema_editor):
+        Status = apps.get_model("migration", "Status")
+        Status.objects.create(name="New")
+        Status.objects.create(name="Continued")
+        Status.objects.create(name="Removed")
+
+
+    def update_thing_statuses(apps, schema_editor):
+        Thing = apps.get_model("migration", "Thing")
+        Status = apps.get_model("migration", "Status")
+        for thing in Thing.objects.all():
+            thing.new_status = Status.objects.get(name=thing.status)
+            thing.save()
+
+
+    class Migration(migrations.Migration):
+
+        dependencies = [
+            ("migration", "0001_initial"),
+        ]
+
+        operations = [
+            migrations.CreateModel(
+                name="Status",
+                fields=[
+                    (
+                        "id",
+                        models.BigAutoField(
+                            auto_created=True,
+                            primary_key=True,
+                            serialize=False,
+                            verbose_name="ID",
+                        ),
+                    ),
+                    ("name", models.CharField(max_length=32, verbose_name="Name")),
+                ],
+            ),
+            migrations.AlterField(
+                model_name="thing",
+                name="new_status",
+                field=models.ForeignKey(
+                    on_delete=django.db.models.deletion.PROTECT,
+                    related_name="things",
+                    to="migration.status",
+                ),
+            ),
+            migrations.RunPython(create_statuses),
+            migrations.RunPython(update_thing_statuses),
+            migrations.RemoveField(model_name="thing", name="status"),
+            migrations.RenameField(
+                model_name="thing", old_name="new_status", new_name="status"
+            ),
+        ]
+
+... and it didn't work.
+::
+
+    django.core.exceptions.FieldDoesNotExist: Thing has no field named 'new_status'
+
+Well, that's an easy one to spot. I didn't change `AlterField` to `AddField`. Changed it and tried again::
+
+    django.core.exceptions.IntegrityError: NOT NULL constraint failed: new_migration_thing.new_status_id
+
+Well, poop. The status kind of has to be not null, and I didn't declare
+that to begin with. So I changed the ``AddField`` step::
+
+        migrations.AddField(
+            model_name="thing",
+            name="new_status",
+            blank=True,
+            null=True,
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="things",
+                to="migration.status",
+            ),
+        ),
+
+And added anoter ``AlterField`` step at the end (after renaming ``new_status``
+to ``status``)::
+
+        migrations.AlterField(
+            model_name="thing", name="status", blank=False, null=False
+        ),
+
+
+And that didn't work. It raised an error in the ``AddField`` step for ``new_status``::
+
+    TypeError: __init__() got an unexpected keyword argument 'blank'
+
+Re-reading the documentation, I tried this solution for the `
+`AddField`` step::
+
+        migrations.AddField(
+            model_name="thing",
+            name="new_status",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="things",
+                to="migration.status",
+                null=True,
+                blank=True,
+            ),
+        ),
+
+And THAT cacked on the last step. I tried again, recreating the field
+but with the ``null`` and ``blank`` options now set to ``False``::
+
+
+        migrations.AlterField(
+            model_name="thing",
+            name="status",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="things",
+                to="migration.status",
+                null=False,
+                blank=False,
+            ),
+        ),
+
+And the result::
+
+    >manage.py migrate migration
+    Operations to perform:
+      Apply all migrationsn: migration
+    Running migrations:
+      Applying migration.0002_change_status_migration... OK
+
+Holy crap!
+
+::
+
+    >manage.py shell
+    >>> from migration.models import Thing
+    >>> thing = Thing.objects.all()[0]
+    >>> thing.status
+    <Status: Status object (2)>
+
+Holy crap!
+
+.. _`Reddit`: https://www.reddit.com/r/django/comments/n0sce4/best_tactic_for_a_migration/

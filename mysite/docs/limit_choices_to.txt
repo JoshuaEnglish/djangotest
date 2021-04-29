@@ -35,6 +35,7 @@ But, because I like the dropdowns, I tried to see if I could create a filtered
 tabularinline. 
 
 .. code-block:: python
+
 	class RepInline(admin.TabularInline):
 	model = Team.rep.through
 

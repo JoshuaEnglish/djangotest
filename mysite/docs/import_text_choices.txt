@@ -72,10 +72,66 @@ From tests.py::
             self.assertEqual(res.status, Status.CONTINUED)
 
 This doesn't tie the text choices to the database. You can see the issue in
-this commit (TBD).
+this commit (ac9e8956).
 
 From `this answer`_ on StackOverflow, the correct solution should be
-to use a Foregn Key.
+to use a Foregn Key. So I reconfigured the model. The challenge here is 
+I don't see an easy way to create the constants from the model
 
+The updated `models.py`::
+
+    class Status(models.Model):
+        name = models.CharField("Name", max_length=32)
+
+
+    class Territory(models.Model):
+        name = models.CharField("Name", max_length=64)
+        status = models.ForeignKey(
+            Status, on_delete=models.PROTECT, related_name="territories"
+        )
+
+        def __str__(self):
+            return f"{self.name}|{self.status}"
+
+        def __repr__(self):
+            return f"<Territory {self.name}>"
+
+And the new `resources.py`::
+
+
+    from import_export import resources, fields, widgets
+
+    from .models import Territory, Status
+
+
+    class TerritoryResource(resources.ModelResource):
+        status = fields.Field(
+            attribute="status", widget=widgets.ForeignKeyWidget(Status, "name")
+        )
+
+        class Meta:
+            model = Territory
+            skip_unchanged = True
+            fields = ("id", "name", "status")
+
+This still fails the one test I created, because the test database is always
+a fresh database, so I had to add::
+
+    class ImportTestCase(TestCase):
+        def setUp(self):
+            Status.objects.create(name="New")
+            Status.objects.create(name="Continued")
+            Status.objects.create(name="Removed")
+
+        ...
+
+Now in the original application I have already improted 45K lines and already
+manually changed the text in two columns to match the TextChoice so ...
+
+I have to sort out how to migrate the old data to the new model. In this toy I
+simply deleted all the objects.
+I think I have to pull two migrations: Add the new models and foreinkey fields,
+migrate, then delete the old bad items and rename the new foreignkey fields to
+the original names.
 
 .. _this answer: https://stackoverflow.com/questions/66604764/django-textchoices-and-admin-site-register

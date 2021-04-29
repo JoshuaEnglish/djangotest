@@ -17,6 +17,7 @@ do a more serious troubleshooting.
 
    limit_choices_to
    import_text_choices
+   migrations_with_data_change
 
 Indices and tables
 ==================

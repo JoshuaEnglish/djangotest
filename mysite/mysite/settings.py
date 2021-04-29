@@ -34,6 +34,7 @@ ALLOWED_HOSTS = []
 
 INSTALLED_APPS = [
     "limit",
+    "migration",
     "import_text_choice",
     "django.contrib.admin",
     "django.contrib.auth",
